@@ -7,6 +7,7 @@ using Random
 using Distributions
 using InteractiveDynamics
 using GLMakie
+using DrWatson: @dict
 using LinearAlgebra
 
 # RPS types
@@ -19,13 +20,6 @@ struct Scissors <: AbstractHand end
 @agent Hand ContinuousAgent{2} begin
   hand::AbstractHand
   speed::Float64
-  cohere_factor::Float64
-  separation::Float64
-  separate_factor::Float64
-  match_factor::Float64
-  flee_factor::Float64
-  agility::Float64
-  visual_distance::Float64
 end
 
 hand(agent::Hand) = agent.hand
@@ -54,7 +48,7 @@ am(::Scissors) = '✂'
 # Colors
 ac(agent::Hand) = ac(agent.hand)
 ac(::Rock) = "#32a852"
-ac(::Paper) = "#a6a832"
+ac(::Paper) = "#a84432"
 ac(::Scissors) = "#323ca8"
 
 # Reflect an agent at the border
@@ -74,6 +68,7 @@ rand((1, -1))
 function initialise(;
   rps=(10, 10, 10),
   speed=1.0,
+  base_speed=0.5,
   cohere_factor=0.1,
   separation=4.0,
   separate_factor=0.25,
@@ -82,11 +77,25 @@ function initialise(;
   agility=0.7,
   visual_distance=5.0,
   cluster_size=30,
-  extent=(100, 100)
+  extent=(100, 100),
+  periodic=true
 )
+  properties = @dict(
+    speed,
+    base_speed,
+    cohere_factor,
+    separation,
+    separate_factor,
+    match_factor,
+    flee_factor,
+    agility,
+    visual_distance,
+    periodic
+  )
+
   # Initialise model 
-  space = ContinuousSpace(extent; periodic=false)
-  model = ABM(Hand, space)
+  space = ContinuousSpace(extent; periodic=periodic)
+  model = ABM(Hand, space; properties)
 
   # Add agents
   for (qty, typ) in zip(rps, (Rock, Paper, Scissors))
@@ -103,13 +112,6 @@ function initialise(;
         vel,
         typ(),
         speed,
-        cohere_factor,
-        separation,
-        separate_factor,
-        match_factor,
-        flee_factor,
-        agility,
-        visual_distance
       )
     end
   end
@@ -131,8 +133,10 @@ function model_step!(model)
   end
 
   # calculate speeds
-  r = p = s = 0
-  for a in allagents(model)
+  r = p = s = 1
+  ags = collect(allagents(model))
+  Threads.@threads for i in eachindex(ags)
+    a = ags[i]
     if hand(a) isa Rock
       r += 1
     elseif hand(a) isa Paper
@@ -141,14 +145,15 @@ function model_step!(model)
       s += 1
     end
   end
-  vls = 1 .- normalize([r, p, s])
-  for a in allagents(model)
+  speeds = normalize(sqrt.(1 ./ [r, p, s]))
+  Threads.@threads for i in eachindex(ags)
+    a = ags[i]
     if hand(a) isa Rock
-      a.speed = 2^vls[1] * 0.7
+      a.speed = speeds[1] * model.speed + model.base_speed
     elseif hand(a) isa Paper
-      a.speed = 2^vls[2] * 0.7
+      a.speed = speeds[2] * model.speed + model.base_speed
     else
-      a.speed = 2^vls[3] * 0.7
+      a.speed = speeds[3] * model.speed + model.base_speed
     end
   end
 end
@@ -160,7 +165,7 @@ function agent_step!(agent, model)
   # check for agent border collision
   # chasing logic
   agent.vel = agent.vel .+ tuple(rand(Normal(0.0, 0.1), 2)...)
-  close = nearby_ids_exact(agent, model, agent.visual_distance)
+  close = nearby_ids_exact(agent, model, model.visual_distance)
   target = nothing
   cohere = flee = separate = match = (0.0, 0.0)
   Ns = Nf = 0
@@ -170,7 +175,7 @@ function agent_step!(agent, model)
       Ns += 1
       heading = model[id].pos .- agent.pos
       cohere = cohere .+ heading
-      if euclidean_distance(agent, model[id], model) < agent.separation
+      if euclidean_distance(agent, model[id], model) < model.separation
         separate = separate .- heading
       end
       match = match .+ model[id].vel
@@ -188,14 +193,14 @@ function agent_step!(agent, model)
   end
   Ns = max(Ns, 1)
   Nf = max(Nf, 1)
-  cohere = cohere ./ Ns .* agent.cohere_factor
-  separate = separate ./ Ns .* agent.separate_factor
-  match = match ./ Ns .* agent.match_factor
-  flee = flee ./ Nf .* agent.flee_factor
+  cohere = cohere ./ Ns .* model.cohere_factor
+  separate = separate ./ Ns .* model.separate_factor
+  match = match ./ Ns .* model.match_factor
+  flee = flee ./ Nf .* model.flee_factor
 
   if !isnothing(target)
     # lead the agent in the target direction
-    head = (target.pos .- agent.pos) .* agent.agility
+    head = (target.pos .- agent.pos) .* model.agility
     mvel = target.vel .* 0.1
     agent.vel = (agent.vel .+ head .+ mvel .+ separate .+ match .+ cohere .+ flee) ./ 2
     agent.vel = agent.vel ./ norm(agent.vel)
@@ -205,10 +210,11 @@ function agent_step!(agent, model)
   end
 
   # check border
-  border = atborder(agent, spacesize(model))
-  if !isnothing(border)
-    agent.vel = agent.vel .* border
+  if !model.periodic
+    border = atborder(agent, spacesize(model))
+    if !isnothing(border)
+      agent.vel = agent.vel .* border
+    end
   end
   move_agent!(agent, model, agent.speed)
 end
-

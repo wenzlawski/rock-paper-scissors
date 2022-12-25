@@ -1,10 +1,10 @@
 includet("rps.jl")
 
-
 # Initialise the model
-model = initialise(;
-  rps=(20, 20, 20),
+imodel() = initialise(;
+  rps=(10, 10, 10),
   speed=0.7,
+  base_speed=0.5,
   cohere_factor=0.01,
   separation=7.0,
   separate_factor=0.25,
@@ -13,9 +13,11 @@ model = initialise(;
   agility=0.3,
   visual_distance=10.0,
   cluster_size=20,
-  extent=(100, 100)
+  extent=(100, 100),
+  periodic=false
 )
 
+model = imodel()
 # Static step
 step!(model, agent_step!, model_step!)
 
@@ -32,20 +34,38 @@ abmvideo(
 )
 
 # Interactive
+function run_sim(model)
+  rock(a) = hand(a) isa Rock
+  paper(a) = hand(a) isa Paper
+  scissors(a) = hand(a) isa Scissors
+  adata = [(rock, count), (paper, count), (scissors, count)]
 
-# Interactive Plotting
+  properties = Dict(
+    :speed => 0:0.01:1,
+    :base_speed => 0:0.01:1,
+    :cohere_factor => 0:0.01:1,
+    :separation => 0:0.1:10,
+    :separate_factor => 0:0.01:1,
+    :match_factor => 0:0.01:1,
+    :flee_factor => 0:0.01:1,
+    :agility => 0:0.01:1,
+    :visual_distance => 0:1:20
+  )
+  fontsize_theme = Theme(fontsize=40)
+  set_theme!(fontsize_theme)
 
-rock(a) = a.hand isa Rock
-paper(a) = a.hand isa Paper
-scissors(a) = a.hand isa Scissors
-adata = [(rock, count), (paper, count), (scissors, count)]
+  fig, abmobs = abmexploration(model;
+    (agent_step!)=agent_step!, (model_step!)=model_step!, ac=ac, am=am, as=40,
+    params=properties,
+    adata, alabels=["Rock", "Paper", "Scissors"],
+    plotkwargs=(; markersize=0)
+  )
+  fig
+end
 
-fig, abmobs = abmexploration(model;
-  (agent_step!)=agent_step!, (model_step!)=model_step!, ac=ac, am=am, as=20,
-  adata, alabels=["Rock", "Paper", "Scissors"],
-  plotkwargs=(; markersize=0)
-)
-fig
+model = imodel()
+run_sim(model)
+
 
 # Static testing
 function initialise_test()
