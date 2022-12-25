@@ -4,11 +4,9 @@
 
 using Agents
 using Random
-using DrWatson: @dict
 using Distributions
 using InteractiveDynamics
 using GLMakie
-using FileIO
 using LinearAlgebra
 
 # RPS types
